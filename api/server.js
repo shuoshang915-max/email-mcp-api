@@ -1,4 +1,3 @@
-import express from 'express';
 import nodemailer from 'nodemailer';
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
@@ -6,21 +5,35 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 
-const app = express();
-app.use(express.json());
-
-app.post('/api/server/mcp', async (req, res) => {
-    // 允许跨域
+export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
-    if (req.method === 'OPTIONS') return res.status(200).end();
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+    
+    if (req.method !== 'POST') {
+        return res.status(405).json({ error: "Method Not Allowed" });
+    }
+
+    let body = req.body;
+    if (!body) {
+        let buffers = [];
+        for await (let chunk of req) {
+            buffers.push(chunk);
+        }
+        try {
+            body = JSON.parse(Buffer.concat(buffers).toString());
+        } catch (e) {
+            body = {};
+        }
+    }
 
     const server = new McpServer({
         name: "Email-Server",
         version: "1.0.0"
     });
 
-    // 注册发信工具
     server.tool(
         "send_mail",
         "发送一封真实的电子邮件",
@@ -47,7 +60,6 @@ app.post('/api/server/mcp', async (req, res) => {
         }
     );
 
-    // 注册收信工具
     server.tool(
         "check_mail",
         "读取收件箱里的最新未读邮件",
@@ -89,15 +101,12 @@ app.post('/api/server/mcp', async (req, res) => {
         }
     );
 
-    // 处理 MCP 协议请求
     const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
         enableJsonResponse: true,
     });
 
     await server.connect(transport);
-    await transport.handleRequest(req, res, req.body);
-});
-
-// Vercel 运行环境
-export default app;
+    const mockReq = Object.assign(req, { body });
+    await transport.handleRequest(mockReq, res, body);
+}
