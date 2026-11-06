@@ -1,71 +1,103 @@
-const express = require('express');
-const nodemailer = require('nodemailer');
-const { ImapFlow } = require('imapflow');
-const { simpleParser } = require('mailparser');
+import express from 'express';
+import nodemailer from 'nodemailer';
+import { ImapFlow } from 'imapflow';
+import { simpleParser } from 'mailparser';
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { z } from "zod";
 
 const app = express();
 app.use(express.json());
 
-app.post('/api/send_mail', async (req, res) => {
-    try {
-        const { subject, content, sender_name } = req.body || {};
-        if (!subject || !content) {
-            return res.status(400).json({ error: '缺少 subject 或 content 参数' });
-        }
-        const transporter = nodemailer.createTransport({
-            host: 'smtp.qq.com', port: 465, secure: true,
-            auth: { user: process.env.QQ_EMAIL, pass: process.env.QQ_AUTH_CODE }
-        });
-        const info = await transporter.sendMail({
-            from: `"${sender_name || 'AI Companion'}" <${process.env.QQ_EMAIL}>`,
-            to: process.env.TO_EMAIL || process.env.QQ_EMAIL,
-            subject: subject, text: content
-        });
-        res.status(200).json({ success: true, messageId: info.messageId });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
+app.post('/api/server/mcp', async (req, res) => {
+    // 允许跨域
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+    if (req.method === 'OPTIONS') return res.status(200).end();
 
-app.post('/api/check_mail', async (req, res) => {
-    const client = new ImapFlow({
-        host: 'imap.qq.com', port: 993, secure: true,
-        auth: { user: process.env.QQ_EMAIL, pass: process.env.QQ_AUTH_CODE },
-        logger: false
+    const server = new McpServer({
+        name: "Email-Server",
+        version: "1.0.0"
     });
-    try {
-        await client.connect();
-        let lock = await client.getMailboxLock('INBOX');
-        let messages = [];
-        try {
-            let searchResult = await client.search({ unseen: true });
-            if (searchResult && searchResult.length > 0) {
-                let targetSeq = searchResult.slice(-3);
-                let range = targetSeq.join(',');
-                for await (let message of client.fetch(range, { envelope: true, source: true })) {
-                    let parsed = await simpleParser(message.source);
-                    messages.push({
-                        subject: message.envelope.subject || '无主题',
-                        from: message.envelope.from[0]?.address || '未知发件人',
-                        date: message.envelope.date,
-                        content: (parsed.text || '（无文字正文）').trim().slice(0, 500)
-                    });
-                }
-                messages.reverse();
-                await client.messageFlagsAdd(range, ['\\Seen']);
+
+    // 注册发信工具
+    server.tool(
+        "send_mail",
+        "发送一封真实的电子邮件",
+        {
+            subject: z.string().describe("邮件主题"),
+            content: z.string().describe("邮件正文内容"),
+            sender_name: z.string().optional().describe("发件人名称")
+        },
+        async ({ subject, content, sender_name }) => {
+            try {
+                const transporter = nodemailer.createTransport({
+                    host: 'smtp.qq.com', port: 465, secure: true,
+                    auth: { user: process.env.QQ_EMAIL, pass: process.env.QQ_AUTH_CODE }
+                });
+                await transporter.sendMail({
+                    from: `"${sender_name || 'AI Companion'}" <${process.env.QQ_EMAIL}>`,
+                    to: process.env.TO_EMAIL || process.env.QQ_EMAIL,
+                    subject: subject, text: content
+                });
+                return { content: [{ type: "text", text: "邮件发送成功！" }] };
+            } catch (err) {
+                return { content: [{ type: "text", text: "发送失败: " + err.message }], isError: true };
             }
-        } finally { lock.release(); }
-        await client.logout();
-        if (messages.length === 0) {
-            return res.status(200).json({ success: true, count: 0, emails: [], notice: "当前没有收到新的未读邮件。" });
         }
-        res.status(200).json({ success: true, count: messages.length, emails: messages });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+    );
+
+    // 注册收信工具
+    server.tool(
+        "check_mail",
+        "读取收件箱里的最新未读邮件",
+        {},
+        async () => {
+            const client = new ImapFlow({
+                host: 'imap.qq.com', port: 993, secure: true,
+                auth: { user: process.env.QQ_EMAIL, pass: process.env.QQ_AUTH_CODE },
+                logger: false
+            });
+            try {
+                await client.connect();
+                let lock = await client.getMailboxLock('INBOX');
+                let messages = [];
+                try {
+                    let searchResult = await client.search({ unseen: true });
+                    if (searchResult && searchResult.length > 0) {
+                        let range = searchResult.slice(-3).join(',');
+                        for await (let message of client.fetch(range, { envelope: true, source: true })) {
+                            let parsed = await simpleParser(message.source);
+                            messages.push({
+                                subject: message.envelope.subject || '无主题',
+                                from: message.envelope.from[0]?.address || '未知',
+                                content: (parsed.text || '').trim().slice(0, 500)
+                            });
+                        }
+                        await client.messageFlagsAdd(range, ['\\Seen']);
+                    }
+                } finally { lock.release(); }
+                await client.logout();
+                
+                if (messages.length === 0) {
+                    return { content: [{ type: "text", text: "当前没有新的未读邮件。" }] };
+                }
+                return { content: [{ type: "text", text: JSON.stringify(messages, null, 2) }] };
+            } catch (err) {
+                return { content: [{ type: "text", text: "读取失败: " + err.message }], isError: true };
+            }
+        }
+    );
+
+    // 处理 MCP 协议请求
+    const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
+        enableJsonResponse: true,
+    });
+
+    await server.connect(transport);
+    await transport.handleRequest(req, res, req.body);
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on port ${PORT}`);
-});
+// Vercel 运行环境
+export default app;
