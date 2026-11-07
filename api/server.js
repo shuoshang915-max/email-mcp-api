@@ -8,31 +8,17 @@ import { z } from "zod";
 export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
-    if (req.method === 'OPTIONS') {
-        return res.status(200).end();
-    }
-    
-    if (req.method !== 'POST') {
-        return res.status(405).json({ error: "Method Not Allowed" });
-    }
+    if (req.method === 'OPTIONS') return res.status(200).end();
+    if (req.method !== 'POST') return res.status(405).json({ error: "Method Not Allowed" });
 
     let body = req.body;
     if (!body) {
         let buffers = [];
-        for await (let chunk of req) {
-            buffers.push(chunk);
-        }
-        try {
-            body = JSON.parse(Buffer.concat(buffers).toString());
-        } catch (e) {
-            body = {};
-        }
+        for await (let chunk of req) { buffers.push(chunk); }
+        try { body = JSON.parse(Buffer.concat(buffers).toString()); } catch (e) { body = {}; }
     }
 
-    const server = new McpServer({
-        name: "Email-Server",
-        version: "1.0.0"
-    });
+    const server = new McpServer({ name: "Email-Server", version: "1.0.0" });
 
     server.tool(
         "send_mail",
@@ -45,7 +31,12 @@ export default async function handler(req, res) {
         async ({ subject, content, sender_name }) => {
             try {
                 const transporter = nodemailer.createTransport({
-                    host: 'smtp.qq.com', port: 465, secure: true,
+                    host: 'smtp.qq.com', 
+                    port: 587, 
+                    secure: false, 
+                    requireTLS: true,
+                    connectionTimeout: 15000,
+                    greetingTimeout: 15000,
                     auth: { user: process.env.QQ_EMAIL, pass: process.env.QQ_AUTH_CODE }
                 });
                 await transporter.sendMail({
@@ -68,7 +59,9 @@ export default async function handler(req, res) {
             const client = new ImapFlow({
                 host: 'imap.qq.com', port: 993, secure: true,
                 auth: { user: process.env.QQ_EMAIL, pass: process.env.QQ_AUTH_CODE },
-                logger: false
+                logger: false,
+                connectionTimeout: 15000,
+                greetingTimeout: 15000
             });
             try {
                 await client.connect();
@@ -90,10 +83,7 @@ export default async function handler(req, res) {
                     }
                 } finally { lock.release(); }
                 await client.logout();
-                
-                if (messages.length === 0) {
-                    return { content: [{ type: "text", text: "当前没有新的未读邮件。" }] };
-                }
+                if (messages.length === 0) return { content: [{ type: "text", text: "当前没有新的未读邮件。" }] };
                 return { content: [{ type: "text", text: JSON.stringify(messages, null, 2) }] };
             } catch (err) {
                 return { content: [{ type: "text", text: "读取失败: " + err.message }], isError: true };
@@ -101,12 +91,7 @@ export default async function handler(req, res) {
         }
     );
 
-    const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: undefined,
-        enableJsonResponse: true,
-    });
-
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     await server.connect(transport);
-    const mockReq = Object.assign(req, { body });
-    await transport.handleRequest(mockReq, res, body);
+    await transport.handleRequest(req, res, body);
 }
