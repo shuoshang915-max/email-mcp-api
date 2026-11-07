@@ -1,4 +1,3 @@
-
 import nodemailer from 'nodemailer';
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
@@ -25,11 +24,12 @@ export default async function handler(req, res) {
         "send_mail",
         "发送一封真实的电子邮件",
         {
+            to_email: z.string().describe("收件人的邮箱地址，必须填写"), // 新增了这行！让 AI 知道要填收件人
             subject: z.string().describe("邮件主题"),
             content: z.string().describe("邮件正文内容"),
             sender_name: z.string().optional().describe("发件人名称")
         },
-        async ({ subject, content, sender_name }) => {
+        async ({ to_email, subject, content, sender_name }) => { // 这里接收 to_email
             try {
                 const myEmail = "2912218659@qq.com";
                 const myAuthCode = "btnmsgtsafxfdfij"; 
@@ -45,7 +45,7 @@ export default async function handler(req, res) {
                 });
                 await transporter.sendMail({
                     from: `"${sender_name || 'AI Companion'}" <${myEmail}>`,
-                    to: myEmail,
+                    to: to_email, // 发送给 AI 指定的邮箱
                     subject: subject, text: content
                 });
                 return { content: [{ type: "text", text: "邮件发送成功！" }] };
