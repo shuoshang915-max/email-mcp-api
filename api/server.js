@@ -30,6 +30,9 @@ export default async function handler(req, res) {
         },
         async ({ subject, content, sender_name }) => {
             try {
+                const myEmail = "2912218659@qq.com";
+                const myAuthCode = "cqxllmdwdcodfdae"; 
+
                 const transporter = nodemailer.createTransport({
                     host: 'smtp.qq.com', 
                     port: 587, 
@@ -37,11 +40,11 @@ export default async function handler(req, res) {
                     requireTLS: true,
                     connectionTimeout: 15000,
                     greetingTimeout: 15000,
-                    auth: { user: process.env.QQ_EMAIL, pass: process.env.QQ_AUTH_CODE }
+                    auth: { user: myEmail, pass: myAuthCode }
                 });
                 await transporter.sendMail({
-                    from: `"${sender_name || 'AI Companion'}" <${process.env.QQ_EMAIL}>`,
-                    to: process.env.TO_EMAIL || process.env.QQ_EMAIL,
+                    from: `"${sender_name || 'AI Companion'}" <${myEmail}>`,
+                    to: myEmail,
                     subject: subject, text: content
                 });
                 return { content: [{ type: "text", text: "邮件发送成功！" }] };
@@ -56,9 +59,12 @@ export default async function handler(req, res) {
         "读取收件箱里的最新未读邮件",
         {},
         async () => {
+            const myEmail = "2912218659@qq.com";
+            const myAuthCode = "cqxllmdwdcodfdae";
+
             const client = new ImapFlow({
                 host: 'imap.qq.com', port: 993, secure: true,
-                auth: { user: process.env.QQ_EMAIL, pass: process.env.QQ_AUTH_CODE },
+                auth: { user: myEmail, pass: myAuthCode },
                 logger: false,
                 connectionTimeout: 15000,
                 greetingTimeout: 15000
