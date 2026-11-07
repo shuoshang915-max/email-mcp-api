@@ -1,3 +1,4 @@
+
 import nodemailer from 'nodemailer';
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
@@ -31,7 +32,7 @@ export default async function handler(req, res) {
         async ({ subject, content, sender_name }) => {
             try {
                 const myEmail = "2912218659@qq.com";
-                const myAuthCode = "wjqjmpmhyhhndcfc"; 
+                const myAuthCode = "btnmsgtsafxfdfij"; 
 
                 const transporter = nodemailer.createTransport({
                     host: 'smtp.qq.com', 
@@ -60,7 +61,7 @@ export default async function handler(req, res) {
         {},
         async () => {
             const myEmail = "2912218659@qq.com";
-            const myAuthCode = "wjqjmpmhyhhndcfc";
+            const myAuthCode = "btnmsgtsafxfdfij";
 
             const client = new ImapFlow({
                 host: 'imap.qq.com', port: 993, secure: true,
